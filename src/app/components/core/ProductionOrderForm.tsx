@@ -1,9 +1,6 @@
-
-
-
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { Button } from "@/components/ui/button";
@@ -27,19 +24,19 @@ import {
 } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
-import { CalendarIcon, Loader2 } from "lucide-react";
+import { CalendarIcon, Loader2, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { ProductionOrder, Resource } from "@/lib/types";
 import { productionOrderSchema, ProductionOrderFormData, ORDER_STATUSES } from "@/lib/validators";
-import { useAppStore } from "@/lib/store";
 import { toast } from "sonner";
 
 interface ProductionOrderFormProps {
-  order?: ProductionOrder | null; // For editing
+  order?: ProductionOrder | null;
   onOpenChange: (open: boolean) => void;
   onFormSubmitSuccess: () => void;
-  resources: Resource[]; // Add resources prop
+  resources: Resource[];
+  existingOrders: ProductionOrder[];
 }
 
 export function ProductionOrderForm({
@@ -47,67 +44,128 @@ export function ProductionOrderForm({
   onOpenChange,
   onFormSubmitSuccess,
   resources,
+  existingOrders,
 }: ProductionOrderFormProps) {
-  const { addOrder, updateOrder } = useAppStore((state) => ({
-    addOrder: state.addOrder,
-    updateOrder: state.updateOrder,
-  }));
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [conflictMessage, setConflictMessage] = useState<string | null>(null);
 
   const form = useForm<ProductionOrderFormData>({
     resolver: zodResolver(productionOrderSchema),
-    defaultValues: {
-      orderName: order?.orderName || "",
-      notes: order?.notes || "",
-      status: order?.status || "Pending",
-      resourceId: order?.resourceId || undefined,
-      startTime: order?.startTime ? new Date(order.startTime) : undefined,
-      endTime: order?.endTime ? new Date(order.endTime) : undefined,
-    },
+    defaultValues: order
+      ? {
+          orderName: order.orderName,
+          notes: order.notes || "",
+          status: order.status,
+          resourceId: order.resourceId,
+          startTime: order.startTime ? new Date(order.startTime) : undefined,
+          endTime: order.endTime ? new Date(order.endTime) : undefined,
+        }
+      : {
+          orderName: "",
+          notes: "",
+          status: "Pending",
+          resourceId: undefined,
+          startTime: undefined,
+          endTime: undefined,
+        },
   });
 
-  const availableResources = useMemo(
-    () => resources.filter((r) => r.status === "Available" || r.id === order?.resourceId),
-    [resources, order]
-  );
+  // Show all resources, not just "Available"
+  const availableResources = useMemo(() => resources, [resources]);
 
-  function onSubmit(data: ProductionOrderFormData) {
+  // Watch form fields for conflict checking
+  const watchedResourceId = form.watch("resourceId");
+  const watchedStartTime = form.watch("startTime");
+  const watchedEndTime = form.watch("endTime");
+
+  // Check for scheduling conflicts
+  useEffect(() => {
+    if (watchedResourceId && watchedStartTime && watchedEndTime) {
+      const conflicts = existingOrders.filter((existingOrder) => {
+        if (
+          existingOrder.status !== "Scheduled" ||
+          existingOrder.resourceId !== watchedResourceId ||
+          !existingOrder.startTime ||
+          !existingOrder.endTime ||
+          (order && existingOrder.id === order.id)
+        ) {
+          return false;
+        }
+
+        const existingStart = new Date(existingOrder.startTime);
+        const existingEnd = new Date(existingOrder.endTime);
+        const newStart = watchedStartTime;
+        const newEnd = watchedEndTime;
+
+        return newStart < existingEnd && newEnd > existingStart;
+      });
+
+      if (conflicts.length > 0) {
+        setConflictMessage(
+          `This time slot conflicts with ${conflicts.length} existing order(s) for this resource.`
+        );
+      } else {
+        setConflictMessage(null);
+      }
+    } else {
+      setConflictMessage(null);
+    }
+  }, [watchedResourceId, watchedStartTime, watchedEndTime, existingOrders, order]);
+
+  async function onSubmit(data: ProductionOrderFormData) {
     setIsSubmitting(true);
     try {
+      // Client-side validation
       if (data.status === "Scheduled") {
         if (!data.resourceId || !data.startTime || !data.endTime) {
-          toast.error("For 'Scheduled' orders, Resource, Start Time, and End Time are mandatory.");
+          toast.error("Resource, Start Time, and End Time are required for Scheduled orders.");
           setIsSubmitting(false);
           return;
         }
         const selectedResource = resources.find((r) => r.id === data.resourceId);
-        if (
-          selectedResource &&
-          selectedResource.status !== "Available" &&
-          order?.resourceId !== selectedResource.id
-        ) {
-          toast.error(
-            `Resource "${selectedResource.name}" is not Available. Please select an Available resource.`
+        if (selectedResource && selectedResource.status !== "Available") {
+          toast.warning(
+            `Resource "${selectedResource.name}" is "${selectedResource.status}". Ensure this is intentional.`
           );
+        }
+        if (data.endTime <= data.startTime) {
+          toast.error("End Time must be after Start Time.");
+          setIsSubmitting(false);
+          return;
+        }
+        if (conflictMessage) {
+          toast.error("Cannot submit: Resolve scheduling conflicts first.");
           setIsSubmitting(false);
           return;
         }
       }
 
-      if (order) {
-        // Editing existing order
-        updateOrder(order.id, data);
-        toast.success("Order updated successfully!");
-      } else {
-        // Creating new order
-        addOrder(data);
-        toast.success("Order created successfully!");
+      const payload = {
+        orderName: data.orderName,
+        status: data.status,
+        resourceId: data.resourceId,
+        startTime: data.startTime?.toISOString(),
+        endTime: data.endTime?.toISOString(),
+        notes: data.notes,
+      };
+
+      const response = await fetch("/api/orders", {
+        method: order ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(order ? { id: order.id, ...payload } : payload),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || `Failed to ${order ? "update" : "create"} order`);
       }
+
+      toast.success(`Order ${order ? "updated" : "created"} successfully!`);
       onFormSubmitSuccess();
       onOpenChange(false);
     } catch (error) {
       console.error("Form submission error:", error);
-      toast.error("An error occurred. Please try again.");
+      toast.error(error.message || `An error occurred while ${order ? "updating" : "creating"} the order.`);
     } finally {
       setIsSubmitting(false);
     }
@@ -127,7 +185,12 @@ export function ProductionOrderForm({
                 Order Name <span className="text-destructive">*</span>
               </FormLabel>
               <FormControl>
-                <Input placeholder="e.g., Batch #123 Widgets" {...field} data-testid="orderName" className="text-white" />
+                <Input
+                  placeholder="e.g., Batch #123 Widgets"
+                  {...field}
+                  data-testid="orderName"
+                  className="text-white bg-gray-800 border-gray-700"
+                />
               </FormControl>
               <FormMessage />
             </FormItem>
@@ -138,17 +201,17 @@ export function ProductionOrderForm({
           control={form.control}
           name="status"
           render={({ field }) => (
-            <FormItem className="text-white">
+            <FormItem>
               <FormLabel className="text-white">
-                Status <span className="text-destructive ">*</span>
+                Status <span className="text-destructive">*</span>
               </FormLabel>
-              <Select  onValueChange={field.onChange} defaultValue={field.value} data-testid="status-select" >
+              <Select onValueChange={field.onChange} defaultValue={field.value} data-testid="status-select">
                 <FormControl>
-                  <SelectTrigger>
+                  <SelectTrigger className="text-white bg-gray-800 border-gray-700">
                     <SelectValue placeholder="Select order status" />
                   </SelectTrigger>
                 </FormControl>
-                <SelectContent className="text-white">
+                <SelectContent className="bg-gray-800 text-white border-gray-700">
                   {ORDER_STATUSES.map((status) => (
                     <SelectItem key={status} value={status}>
                       {status}
@@ -167,33 +230,44 @@ export function ProductionOrderForm({
               control={form.control}
               name="resourceId"
               render={({ field }) => (
-                <FormItem className="text-white">
+                <FormItem>
                   <FormLabel className="text-white">
-                    Resource <span className="text-destructive text-white">*</span>
+                    Resource <span className="text-destructive">*</span>
                   </FormLabel>
-                  <Select  onValueChange={field.onChange} defaultValue={field.value}>
+                  <Select onValueChange={field.onChange} defaultValue={field.value} data-testid="resource-select">
                     <FormControl>
-                      <SelectTrigger data-testid="resource-select">
-                        <SelectValue className="text-white" placeholder="Select a resource" />
+                      <SelectTrigger
+                        className={cn(
+                          "text-white bg-gray-800 border-gray-700",
+                          conflictMessage && "border-destructive"
+                        )}
+                      >
+                        <SelectValue placeholder="Select a resource" />
                       </SelectTrigger>
                     </FormControl>
-                    <SelectContent className="text-white">
+                    <SelectContent className="bg-gray-800 text-white border-gray-700">
                       {availableResources.length > 0 ? (
                         availableResources.map((resource: Resource) => (
-                          <SelectItem className="text-white" key={resource.id} value={resource.id}>
+                          <SelectItem key={resource.id} value={resource.id}>
                             {resource.name} ({resource.status})
                           </SelectItem>
                         ))
                       ) : (
                         <SelectItem value="no-resources" disabled>
-                          No available resources
+                          No resources available
                         </SelectItem>
                       )}
                     </SelectContent>
                   </Select>
-                  {availableResources.length === 0 && (
+                  {conflictMessage && (
+                    <FormDescription className="text-destructive flex items-center gap-1">
+                      <AlertCircle className="h-4 w-4" />
+                      {conflictMessage}
+                    </FormDescription>
+                  )}
+                  {availableResources.length === 0 && !conflictMessage && (
                     <FormDescription className="text-destructive">
-                      No resources are currently 'Available'.
+                      No resources are available. Please add resources in the Resources page.
                     </FormDescription>
                   )}
                   <FormMessage />
@@ -206,43 +280,37 @@ export function ProductionOrderForm({
                 control={form.control}
                 name="startTime"
                 render={({ field }) => (
-                  <FormItem className="flex flex-col text-white">
+                  <FormItem className="flex flex-col">
                     <FormLabel className="text-white">
                       Start Time <span className="text-destructive">*</span>
                     </FormLabel>
                     <Popover>
                       <PopoverTrigger asChild>
-                        <FormControl className="text-white">
+                        <FormControl>
                           <Button
-                          
-                            variant={"outline"}
+                            variant="outline"
                             className={cn(
-                              "pl-3 text-left font-normal text-white",
-                              !field.value && "text-muted-foreground"
+                              "pl-3 text-left font-normal text-white bg-gray-800 border-gray-700",
+                              !field.value && "text-muted-foreground",
+                              conflictMessage && "border-destructive"
                             )}
                             data-testid="startTime"
                           >
-                            {field.value ? (
-                              format(field.value, "PPP HH:mm")
-                            ) : (
-                              <span>Pick a date and time</span>
-                            )}
-                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50 text-white" />
+                            {field.value ? format(field.value, "PPP HH:mm") : <span>Pick a date and time</span>}
+                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
                           </Button>
                         </FormControl>
                       </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
+                      <PopoverContent className="w-auto p-0 bg-gray-800 text-white border-gray-700" align="start">
                         <Calendar
                           mode="single"
                           selected={field.value}
                           onSelect={field.onChange}
                           disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
                           initialFocus
-                          className="text-white"
                         />
-                        <div className="p-2 border-t border-black">
+                        <div className="p-2 border-t border-gray-700">
                           <Input
-                          className="text-white"
                             type="time"
                             defaultValue={field.value ? format(field.value, "HH:mm") : "09:00"}
                             onChange={(e) => {
@@ -251,6 +319,7 @@ export function ProductionOrderForm({
                               newDate.setHours(hours, minutes);
                               field.onChange(newDate);
                             }}
+                            className="text-white bg-gray-800 border-gray-700"
                           />
                         </div>
                       </PopoverContent>
@@ -264,31 +333,28 @@ export function ProductionOrderForm({
                 control={form.control}
                 name="endTime"
                 render={({ field }) => (
-                  <FormItem className="flex flex-col text-white">
-                    <FormLabel  className="text-white">
+                  <FormItem className="flex flex-col">
+                    <FormLabel className="text-white">
                       End Time <span className="text-destructive">*</span>
                     </FormLabel>
                     <Popover>
                       <PopoverTrigger asChild>
                         <FormControl>
                           <Button
-                            variant={"outline"}
+                            variant="outline"
                             className={cn(
-                              "pl-3 text-left font-normal text-white",
-                              !field.value && "text-muted-foreground"
+                              "pl-3 text-left font-normal text-white bg-gray-800 border-gray-700",
+                              !field.value && "text-muted-foreground",
+                              conflictMessage && "border-destructive"
                             )}
                             data-testid="endTime"
                           >
-                            {field.value ? (
-                              format(field.value, "PPP HH:mm")
-                            ) : (
-                              <span >Pick a date and time</span>
-                            )}
-                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50 text-white" />
+                            {field.value ? format(field.value, "PPP HH:mm") : <span>Pick a date and time</span>}
+                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
                           </Button>
                         </FormControl>
                       </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
+                      <PopoverContent className="w-auto p-0 bg-gray-800 text-white border-gray-700" align="start">
                         <Calendar
                           mode="single"
                           selected={field.value}
@@ -298,11 +364,9 @@ export function ProductionOrderForm({
                             date < new Date(new Date().setHours(0, 0, 0, 0))
                           }
                           initialFocus
-                          className="text-white"
                         />
-                        <div className="p-2 border-t">
+                        <div className="p-2 border-t border-gray-700">
                           <Input
-                          className="text-white"
                             type="time"
                             defaultValue={field.value ? format(field.value, "HH:mm") : "17:00"}
                             onChange={(e) => {
@@ -311,6 +375,7 @@ export function ProductionOrderForm({
                               newDate.setHours(hours, minutes);
                               field.onChange(newDate);
                             }}
+                            className="text-white bg-gray-800 border-gray-700"
                           />
                         </div>
                       </PopoverContent>
@@ -332,21 +397,33 @@ export function ProductionOrderForm({
               <FormControl>
                 <Textarea
                   placeholder="Add any relevant notes for this production order..."
-                  className="resize-none text-white"
+                  className="resize-none text-white bg-gray-800 border-gray-700"
                   {...field}
                   data-testid="notes"
-                  
                 />
               </FormControl>
               <FormMessage />
             </FormItem>
           )}
         />
+
         <div className="flex justify-end space-x-2">
-          <Button className="text-white" type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={isSubmitting}>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+            disabled={isSubmitting}
+            className="text-white border-gray-700 hover:bg-gray-700 bg-black"
+          >
             Cancel
           </Button>
-          <Button className="text-white" type="submit" variant="outline" disabled={isSubmitting} data-testid="submit-order">
+          <Button
+            type="submit"
+            variant="outline"
+            disabled={isSubmitting || !!conflictMessage}
+            data-testid="submit-order"
+            className="text-white border-gray-700 hover:bg-gray-700 bg-black"
+          >
             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             {order ? "Update Order" : "Create Order"}
           </Button>

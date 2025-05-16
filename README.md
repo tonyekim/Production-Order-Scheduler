@@ -1,6 +1,6 @@
 # Production Order Scheduler - Phase 1
 
-This web application allows users to manage and schedule Production Orders onto predefined Resources. Phase 1 focuses on core order creation, scheduling, viewing, and a simple dashboard, using in-memory state management.
+A web application to manage and schedule production orders, built for the React Coding Challenge (Phase 1).
 
 ## Table of Contents
 
@@ -25,15 +25,11 @@ This web application allows users to manage and schedule Production Orders onto 
 3.  **Install project dependencies:**
     ```bash
     npm install
-    # or
-    yarn install
     ```
 
 4.  **Run the development server:**
     ```bash
     npm run dev
-    # or
-    yarn dev
     ```
     The application will be available at `http://localhost:3000`.
 
@@ -123,3 +119,14 @@ Tests are located in the `tests/e2e` directory.
 ## Bonus Features
 
 * (None implemented in Phase 1)
+
+### Setup SQLite Instructions
+* (Phase 2 Implemented)
+
+1. Install dependencies: `npm install`.
+2. Set up SQLite database:
+   - Create `.env` with `DATABASE_URL="file:./dev.db"`.
+   - Run `npx prisma migrate dev` to create tables.
+   - Seed resources via `npx prisma studio` or `POST /api/resources`.
+3. Run the app: `npm run dev`.
+4. Run tests: `npx playwright test`.

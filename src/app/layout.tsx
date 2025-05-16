@@ -4,7 +4,7 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { Toaster as SonnerToaster } from "@/components/ui/sonner";
-import { AppProvider } from "@/context/AppContext";
+
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-sans" });
 
@@ -20,7 +20,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <AppProvider>
+   
       <body
         className={cn(
           "min-h-screen bg-background font-sans antialiased",
@@ -30,7 +30,7 @@ export default function RootLayout({
         {children}
         <SonnerToaster richColors />
       </body>
-      </AppProvider>
+    
     </html>
   );
 }

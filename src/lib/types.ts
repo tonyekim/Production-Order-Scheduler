@@ -1,25 +1,20 @@
-// lib/types.ts
-export type ResourceStatus = "Available" | "Busy" | "Maintenance";
-export type OrderStatus =
-  | "Pending"
-  | "Scheduled"
-  | "InProgress"
-  | "Completed"
-  | "Cancelled";
-
-export interface Resource {
+export type Resource = {
   id: string;
   name: string;
-  status: ResourceStatus;
-}
+  status: 'Available' | 'Busy' | 'Maintenance';
+  createdAt: string;
+  updatedAt: string;
+};
 
-export interface ProductionOrder {
+export type ProductionOrder = {
   id: string;
   orderName: string;
-  status: OrderStatus;
+  status: 'Pending' | 'Scheduled' | 'InProgress' | 'Completed' | 'Cancelled';
   resourceId?: string;
-  startTime?: Date;
-  endTime?: Date;
+  resource?: Resource;
+  startTime?: string;
+  endTime?: string;
   notes?: string;
-  createdAt: Date;
-}
+  createdAt: string;
+  updatedAt: string;
+};
