@@ -125,6 +125,17 @@ Tests are located in the `tests/e2e` directory.
 2. Set up SQLite database:
    - Create `.env` with `DATABASE_URL="file:./dev.db"`.
    - Run `npx prisma migrate dev` to create tables.
-   - Seed resources via `npx prisma studio` or `POST /api/resources`.
+   - Seed resources via `npx prisma studio` or `POST /api/resources`. 
+   - Add `CNC Machine 1` and `Assembly Line A`
 3. Run the app: `npm run dev`.
 4. Run tests: `npx playwright test`.
+
+
+
+## Known Issues/Limitations (Phase 2)
+
+- **Resource Seeding Required**: The application requires resources to be seeded in the SQLite database using `npx prisma studio` before production orders can be scheduled. Without seeded resources, the order form's resource dropdown will be empty, preventing scheduling.
+- **Conflict Detection**: Currently checks for basic time overlaps but doesn’t account for complex scenarios (e.g., resource downtime or partial overlaps). This could be improved with more robust logic.
+- **Error Handling**: API endpoints include basic error responses, but edge cases (e.g., database connection failures) need more comprehensive handling.
+- **Performance**: Fetching all orders/resources in a single call may not scale well with large datasets; pagination could be added.
+- **Time Zones**: Still reliant on browser defaults, which could lead to inconsistencies across users.
