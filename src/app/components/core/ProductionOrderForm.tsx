@@ -22,13 +22,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { CalendarIcon, Loader2, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { ProductionOrder, Resource } from "@/lib/types";
-import { productionOrderSchema, ProductionOrderFormData, ORDER_STATUSES } from "@/lib/validators";
+import {
+  productionOrderSchema,
+  ProductionOrderFormData,
+  ORDER_STATUSES,
+} from "@/lib/validators";
 import { toast } from "sonner";
 
 interface ProductionOrderFormProps {
@@ -57,8 +65,8 @@ export function ProductionOrderForm({
           notes: order.notes || "",
           status: order.status,
           resourceId: order.resourceId,
-          startTime: order.startTime ? new Date(order.startTime) : undefined,
-          endTime: order.endTime ? new Date(order.endTime) : undefined,
+          startTime: order.startTime || undefined, // Keep as string
+          endTime: order.endTime || undefined,
         }
       : {
           orderName: "",
@@ -79,97 +87,96 @@ export function ProductionOrderForm({
   const watchedEndTime = form.watch("endTime");
 
   // Check for scheduling conflicts
-  useEffect(() => {
-    if (watchedResourceId && watchedStartTime && watchedEndTime) {
-      const conflicts = existingOrders.filter((existingOrder) => {
-        if (
-          existingOrder.status !== "Scheduled" ||
-          existingOrder.resourceId !== watchedResourceId ||
-          !existingOrder.startTime ||
-          !existingOrder.endTime ||
-          (order && existingOrder.id === order.id)
-        ) {
-          return false;
-        }
-
-        const existingStart = new Date(existingOrder.startTime);
-        const existingEnd = new Date(existingOrder.endTime);
-        const newStart = watchedStartTime;
-        const newEnd = watchedEndTime;
-
-        return newStart < existingEnd && newEnd > existingStart;
-      });
-
-      if (conflicts.length > 0) {
-        setConflictMessage(
-          `This time slot conflicts with ${conflicts.length} existing order(s) for this resource.`
-        );
-      } else {
-        setConflictMessage(null);
+useEffect(() => {
+  if (watchedResourceId && watchedStartTime && watchedEndTime) {
+    const newStart = new Date(watchedStartTime); // Convert string to Date
+    const newEnd = new Date(watchedEndTime);     // Convert string to Date
+    const conflicts = existingOrders.filter((existingOrder) => {
+      if (
+        existingOrder.status !== "Scheduled" ||
+        existingOrder.resourceId !== watchedResourceId ||
+        !existingOrder.startTime ||
+        !existingOrder.endTime ||
+        (order && existingOrder.id === order.id)
+      ) {
+        return false;
       }
+
+      const existingStart = new Date(existingOrder.startTime);
+      const existingEnd = new Date(existingOrder.endTime);
+
+      return newStart < existingEnd && newEnd > existingStart;
+    });
+
+    if (conflicts.length > 0) {
+      setConflictMessage(
+        `This time slot conflicts with ${conflicts.length} existing order(s) for this resource.`
+      );
     } else {
       setConflictMessage(null);
     }
-  }, [watchedResourceId, watchedStartTime, watchedEndTime, existingOrders, order]);
-
-  async function onSubmit(data: ProductionOrderFormData) {
-    setIsSubmitting(true);
-    try {
-      // Client-side validation
-      if (data.status === "Scheduled") {
-        if (!data.resourceId || !data.startTime || !data.endTime) {
-          toast.error("Resource, Start Time, and End Time are required for Scheduled orders.");
-          setIsSubmitting(false);
-          return;
-        }
-        const selectedResource = resources.find((r) => r.id === data.resourceId);
-        if (selectedResource && selectedResource.status !== "Available") {
-          toast.warning(
-            `Resource "${selectedResource.name}" is "${selectedResource.status}". Ensure this is intentional.`
-          );
-        }
-        if (data.endTime <= data.startTime) {
-          toast.error("End Time must be after Start Time.");
-          setIsSubmitting(false);
-          return;
-        }
-        if (conflictMessage) {
-          toast.error("Cannot submit: Resolve scheduling conflicts first.");
-          setIsSubmitting(false);
-          return;
-        }
-      }
-
-      const payload = {
-        orderName: data.orderName,
-        status: data.status,
-        resourceId: data.resourceId,
-        startTime: data.startTime?.toISOString(),
-        endTime: data.endTime?.toISOString(),
-        notes: data.notes,
-      };
-
-      const response = await fetch("/api/orders", {
-        method: order ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(order ? { id: order.id, ...payload } : payload),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || `Failed to ${order ? "update" : "create"} order`);
-      }
-
-      toast.success(`Order ${order ? "updated" : "created"} successfully!`);
-      onFormSubmitSuccess();
-      onOpenChange(false);
-    } catch (error) {
-      console.error("Form submission error:", error);
-      toast.error(error.message || `An error occurred while ${order ? "updating" : "creating"} the order.`);
-    } finally {
-      setIsSubmitting(false);
-    }
+  } else {
+    setConflictMessage(null);
   }
+}, [watchedResourceId, watchedStartTime, watchedEndTime, existingOrders, order]);
+
+async function onSubmit(data: ProductionOrderFormData) {
+  setIsSubmitting(true);
+  try {
+    if (data.status === "Scheduled") {
+      if (!data.resourceId || !data.startTime || !data.endTime) {
+        toast.error("Resource, Start Time, and End Time are required for Scheduled orders.");
+        setIsSubmitting(false);
+        return;
+      }
+      const selectedResource = resources.find((r) => r.id === data.resourceId);
+      if (selectedResource && selectedResource.status !== "Available") {
+        toast.warning(
+          `Resource "${selectedResource.name}" is "${selectedResource.status}". Ensure this is intentional.`
+        );
+      }
+      if (data.endTime <= data.startTime) { // String comparison works for ISO strings
+        toast.error("End Time must be after Start Time.");
+        setIsSubmitting(false);
+        return;
+      }
+      if (conflictMessage) {
+        toast.error("Cannot submit: Resolve scheduling conflicts first.");
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
+    const payload = {
+      orderName: data.orderName,
+      status: data.status,
+      resourceId: data.resourceId,
+      startTime: data.startTime, // Already a string
+      endTime: data.endTime,     // Already a string
+      notes: data.notes,
+    };
+
+    const response = await fetch("/api/orders", {
+      method: order ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(order ? { id: order.id, ...payload } : payload),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || `Failed to ${order ? "update" : "create"} order`);
+    }
+
+    toast.success(`Order ${order ? "updated" : "created"} successfully!`);
+    onFormSubmitSuccess();
+    onOpenChange(false);
+  } catch (error) {
+    console.error("Form submission error:", error);
+    toast.error(error.message || `An error occurred while ${order ? "updating" : "creating"} the order.`);
+  } finally {
+    setIsSubmitting(false);
+  }
+}
 
   const watchedStatus = form.watch("status");
 
@@ -205,7 +212,11 @@ export function ProductionOrderForm({
               <FormLabel className="text-white">
                 Status <span className="text-destructive">*</span>
               </FormLabel>
-              <Select onValueChange={field.onChange} defaultValue={field.value} data-testid="status-select">
+              <Select
+                onValueChange={field.onChange}
+                defaultValue={field.value}
+                data-testid="status-select"
+              >
                 <FormControl>
                   <SelectTrigger className="text-white bg-gray-800 border-gray-700">
                     <SelectValue placeholder="Select order status" />
@@ -234,7 +245,11 @@ export function ProductionOrderForm({
                   <FormLabel className="text-white">
                     Resource <span className="text-destructive">*</span>
                   </FormLabel>
-                  <Select onValueChange={field.onChange} defaultValue={field.value} data-testid="resource-select">
+                  <Select
+                    onValueChange={field.onChange}
+                    defaultValue={field.value}
+                    data-testid="resource-select"
+                  >
                     <FormControl>
                       <SelectTrigger
                         className={cn(
@@ -267,7 +282,8 @@ export function ProductionOrderForm({
                   )}
                   {availableResources.length === 0 && !conflictMessage && (
                     <FormDescription className="text-destructive">
-                      No resources are available. Please add resources in the Resources page.
+                      No resources are available. Please add resources in the
+                      Resources page.
                     </FormDescription>
                   )}
                   <FormMessage />
@@ -279,110 +295,188 @@ export function ProductionOrderForm({
               <FormField
                 control={form.control}
                 name="startTime"
-                render={({ field }) => (
-                  <FormItem className="flex flex-col">
-                    <FormLabel className="text-white">
-                      Start Time <span className="text-destructive">*</span>
-                    </FormLabel>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <FormControl>
-                          <Button
-                            variant="outline"
-                            className={cn(
-                              "pl-3 text-left font-normal text-white bg-gray-800 border-gray-700",
-                              !field.value && "text-muted-foreground",
-                              conflictMessage && "border-destructive"
-                            )}
-                            data-testid="startTime"
-                          >
-                            {field.value ? format(field.value, "PPP HH:mm") : <span>Pick a date and time</span>}
-                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                          </Button>
-                        </FormControl>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0 bg-gray-800 text-white border-gray-700" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={field.value}
-                          onSelect={field.onChange}
-                          disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
-                          initialFocus
-                        />
-                        <div className="p-2 border-t border-gray-700">
-                          <Input
-                            type="time"
-                            defaultValue={field.value ? format(field.value, "HH:mm") : "09:00"}
-                            onChange={(e) => {
-                              const [hours, minutes] = e.target.value.split(":").map(Number);
-                              const newDate = field.value ? new Date(field.value) : new Date();
-                              newDate.setHours(hours, minutes);
-                              field.onChange(newDate);
+                render={({ field }) => {
+                  const dateValue = field.value
+                    ? new Date(field.value)
+                    : undefined; // Convert string to Date for UI
+                  return (
+                    <FormItem className="flex flex-col">
+                      <FormLabel className="text-white">
+                        Start Time <span className="text-destructive">*</span>
+                      </FormLabel>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <FormControl>
+                            <Button
+                              variant="outline"
+                              className={cn(
+                                "pl-3 text-left font-normal text-white bg-gray-800 border-gray-700",
+                                !field.value && "text-muted-foreground",
+                                conflictMessage && "border-destructive"
+                              )}
+                              data-testid="startTime"
+                            >
+                              {field.value ? (
+                                format(dateValue!, "PPP HH:mm")
+                              ) : (
+                                <span>Pick a date and time</span>
+                              )}
+                              <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                            </Button>
+                          </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          className="w-auto p-0 bg-gray-800 text-white border-gray-700"
+                          align="start"
+                        >
+                          <Calendar
+                            mode="single"
+                            selected={dateValue}
+                            onSelect={(date) => {
+                              if (date) {
+                                const newDate = new Date(date);
+                                if (field.value) {
+                                  // Preserve existing time if set
+                                  const currentDate = new Date(field.value);
+                                  newDate.setHours(
+                                    currentDate.getHours(),
+                                    currentDate.getMinutes()
+                                  );
+                                } else {
+                                  newDate.setHours(9, 0); // Default time if none set
+                                }
+                                field.onChange(newDate.toISOString()); // Convert back to string
+                              } else {
+                                field.onChange(undefined);
+                              }
                             }}
-                            className="text-white bg-gray-800 border-gray-700"
+                            disabled={(date) =>
+                              date < new Date(new Date().setHours(0, 0, 0, 0))
+                            }
+                            initialFocus
                           />
-                        </div>
-                      </PopoverContent>
-                    </Popover>
-                    <FormMessage />
-                  </FormItem>
-                )}
+                          <div className="p-2 border-t border-gray-700">
+                            <Input
+                              type="time"
+                              value={
+                                dateValue ? format(dateValue, "HH:mm") : ""
+                              }
+                              onChange={(e) => {
+                                if (e.target.value) {
+                                  const [hours, minutes] = e.target.value
+                                    .split(":")
+                                    .map(Number);
+                                  const newDate = dateValue
+                                    ? new Date(dateValue)
+                                    : new Date();
+                                  newDate.setHours(hours, minutes);
+                                  field.onChange(newDate.toISOString()); // Update as string
+                                }
+                              }}
+                              className="text-white bg-gray-800 border-gray-700"
+                            />
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                      <FormMessage />
+                    </FormItem>
+                  );
+                }}
               />
 
               <FormField
                 control={form.control}
                 name="endTime"
-                render={({ field }) => (
-                  <FormItem className="flex flex-col">
-                    <FormLabel className="text-white">
-                      End Time <span className="text-destructive">*</span>
-                    </FormLabel>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <FormControl>
-                          <Button
-                            variant="outline"
-                            className={cn(
-                              "pl-3 text-left font-normal text-white bg-gray-800 border-gray-700",
-                              !field.value && "text-muted-foreground",
-                              conflictMessage && "border-destructive"
-                            )}
-                            data-testid="endTime"
-                          >
-                            {field.value ? format(field.value, "PPP HH:mm") : <span>Pick a date and time</span>}
-                            <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
-                          </Button>
-                        </FormControl>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0 bg-gray-800 text-white border-gray-700" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={field.value}
-                          onSelect={field.onChange}
-                          disabled={(date) =>
-                            (form.getValues("startTime") && date < form.getValues("startTime")!) ||
-                            date < new Date(new Date().setHours(0, 0, 0, 0))
-                          }
-                          initialFocus
-                        />
-                        <div className="p-2 border-t border-gray-700">
-                          <Input
-                            type="time"
-                            defaultValue={field.value ? format(field.value, "HH:mm") : "17:00"}
-                            onChange={(e) => {
-                              const [hours, minutes] = e.target.value.split(":").map(Number);
-                              const newDate = field.value ? new Date(field.value) : new Date();
-                              newDate.setHours(hours, minutes);
-                              field.onChange(newDate);
+                render={({ field }) => {
+                  const dateValue = field.value
+                    ? new Date(field.value)
+                    : undefined;
+                  return (
+                    <FormItem className="flex flex-col">
+                      <FormLabel className="text-white">
+                        End Time <span className="text-destructive">*</span>
+                      </FormLabel>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <FormControl>
+                            <Button
+                              variant="outline"
+                              className={cn(
+                                "pl-3 text-left font-normal text-white bg-gray-800 border-gray-700",
+                                !field.value && "text-muted-foreground",
+                                conflictMessage && "border-destructive"
+                              )}
+                              data-testid="endTime"
+                            >
+                              {field.value ? (
+                                format(dateValue!, "PPP HH:mm")
+                              ) : (
+                                <span>Pick a date and time</span>
+                              )}
+                              <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                            </Button>
+                          </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent
+                          className="w-auto p-0 bg-gray-800 text-white border-gray-700"
+                          align="start"
+                        >
+                          <Calendar
+                            mode="single"
+                            selected={dateValue}
+                            onSelect={(date) => {
+                              if (date) {
+                                const newDate = new Date(date);
+                                if (field.value) {
+                                  const currentDate = new Date(field.value);
+                                  newDate.setHours(
+                                    currentDate.getHours(),
+                                    currentDate.getMinutes()
+                                  );
+                                } else {
+                                  newDate.setHours(17, 0); // Default time
+                                }
+                                field.onChange(newDate.toISOString());
+                              } else {
+                                field.onChange(undefined);
+                              }
                             }}
-                            className="text-white bg-gray-800 border-gray-700"
+                            disabled={(date) => {
+                              const startTime = form.getValues("startTime");
+                              return (
+                                (startTime && date < new Date(startTime)) ||
+                                date < new Date(new Date().setHours(0, 0, 0, 0))
+                              );
+                            }}
+                            initialFocus
                           />
-                        </div>
-                      </PopoverContent>
-                    </Popover>
-                    <FormMessage />
-                  </FormItem>
-                )}
+                          <div className="p-2 border-t border-gray-700">
+                            <Input
+                              type="time"
+                              value={
+                                dateValue ? format(dateValue, "HH:mm") : ""
+                              }
+                              onChange={(e) => {
+                                if (e.target.value) {
+                                  const [hours, minutes] = e.target.value
+                                    .split(":")
+                                    .map(Number);
+                                  const newDate = dateValue
+                                    ? new Date(dateValue)
+                                    : new Date();
+                                  newDate.setHours(hours, minutes);
+                                  field.onChange(newDate.toISOString());
+                                }
+                              }}
+                              className="text-white bg-gray-800 border-gray-700"
+                            />
+                          </div>
+                        </PopoverContent>
+                      </Popover>
+                      <FormMessage />
+                    </FormItem>
+                  );
+                }}
               />
             </div>
           </>

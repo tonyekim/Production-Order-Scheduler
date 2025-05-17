@@ -118,9 +118,7 @@ Tests are located in the `tests/e2e` directory.
 
 ## Bonus Features
 
-* (None implemented in Phase 1)
-
-### Setup SQLite Instructions
+### Setup SQLite Instructions Implemented
 * (Phase 2 Implemented)
 
 1. Install dependencies: `npm install`.
