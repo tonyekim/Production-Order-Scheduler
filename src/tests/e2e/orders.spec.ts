@@ -1,4 +1,3 @@
-// tests/e2e/orders.spec.ts
 import { test, expect } from '@playwright/test';
 import { format } from 'date-fns';
 

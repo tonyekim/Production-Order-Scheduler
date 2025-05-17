@@ -1,4 +1,3 @@
-// src/tests/e2e/resource-crud.spec.ts
 import { test, expect } from '@playwright/test';
 
 const BASE_URL = 'http://localhost:3000';
